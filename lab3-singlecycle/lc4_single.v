@@ -1,5 +1,5 @@
 /* TODO: name and PennKeys of all group members here
- *
+ * Ali Alaoui - alaoui, Robert Zhang
  * lc4_single.v
  * Implements a single-cycle data path
  *
@@ -67,8 +67,59 @@ module lc4_processor
    /*******************************
     * TODO: INSERT YOUR CODE HERE *
     *******************************/
+   wire [2:0] nzp;
+   wire [2:0] new_nzp;
+   Nbit_reg #(3, 3'b000) nzp_reg (.in(new_nzp), .out(nzp), .clk(clk), .we(1'b1), .gwe(gwe), .rst(rst));
+
+   wire [2:0] r1sel;
+   wire r1re;
+   wire [2:0] r2sel;
+   wire r2re;
+   wire [2:0] wsel;
+   wire regfile_we;
+   wire nzp_we;
+   wire select_pc_plus_one;
+   wire is_load;
+   wire is_store;
+   wire is_branch;
+   wire is_control_insn;
+
+   wire rs_data, rt_data, rd_data;
+
+   lc4_decoder decoder (.insn(i_cur_insn), .r1sel(r1sel), .r1re(r1re), .r2sel(r2sel), .r2re(r2re), .wsel(wsel),
+                        .regfile_we(regfile_we), .nzp_we(nzp_we), .select_pc_plus_one(select_pc_plus_one), .is_load(is_load),
+                        .is_store(is_store), .is_branch(is_branch), .is_control_insn(is_control_insn));
+
+   lc4_regfile register (.clk(clk), .gwe(gwe), .rst(rst), .i_rs(r1sel), .o_rs_data(rs_data), .i_rt(r2sel), .o_rt_data(rt_data),
+                         .i_rd(wsel), .i_wdata(1'd0), .i_rd_we(1'd1));
+
+   lc4_alu alu (.i_insn(i_cur_insn), .i_pc(pc), .i_r1data(rs_data), .i_r2data(rt_data), .o_result(rd_data));
+   assign new_nzp = (rd_data < 0) ? 3'b100 : (rd_data == 0) ? 3'b010 : 3'b001;
+
+   lc4_regfile updatedRegister (.clk(clk), .gwe(gwe), .rst(rst), .i_rs(r1sel), .o_rs_data(rs_data), .i_rt(r2sel), .o_rt_data(rt_data),
+                                .i_rd(wsel), .i_wdata(rd_data), .i_rd_we(1'd1));
 
 
+   cla16 cla (.a(pc), .b(1'd0), .cin(1), .sum(next_pc));
+
+   // actual output wires
+   assign o_cur_pc = pc;
+   assign o_dmem_we = 1'd0; // change this for lab 3B
+   assign o_dmem_addr = 1'd0; // change this for lab 3B
+   assign o_dmem_towrite = 1'd0; // change this for lab 3B
+
+
+   // test cases
+   assign test_cur_pc = pc;
+   assign test_cur_insn = i_cur_insn;
+   assign test_regfile_we = regfile_we;
+   assign test_regfile_wsel = wsel;
+   assign test_regfile_data = rd_data;
+   assign test_nzp_we = nzp_we;
+   assign test_nzp_new_bits = 1'd1; // come back
+   assign test_dmem_we = 1'd0; // change bottom 3 after 3A
+   assign test_dmem_addr = 1'd0;
+   assign test_dmem_data = 1'd0;
 
    /* Add $display(...) calls in the always block below to
     * print out debug information at the end of every cycle.
