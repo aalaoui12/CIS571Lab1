@@ -1,5 +1,5 @@
 /* TODO: name and PennKeys of all group members here
- * Ali Alaoui - alaoui, Robert Zhang
+ * Ali Alaoui - alaoui, Robert Zhang - robertzh
  * lc4_single.v
  * Implements a single-cycle data path
  *
@@ -67,57 +67,52 @@ module lc4_processor
    /*******************************
     * TODO: INSERT YOUR CODE HERE *
     *******************************/
-   wire [2:0] nzp;
-   wire [2:0] new_nzp;
-   Nbit_reg #(3, 3'b000) nzp_reg (.in(nzp), .out(new_nzp), .clk(clk), .we(1'b1), .gwe(gwe), .rst(rst));
+    // Decoder
+    wire [2:0] r1sel, r2sel;
+    wire r1re, r2re, select_pc_plus_one, is_load, is_store, is_branch, is_control_insn;
+    lc4_decoder decoder(.insn(i_cur_insn), .r1sel(r1sel), .r1re(r1re), .r2sel(r2sel), .r2re(r2re),
+                              .wsel(test_regfile_wsel), .regfile_we(test_regfile_we), .nzp_we(test_nzp_we),
+                              .select_pc_plus_one(select_pc_plus_one), .is_load(is_load), .is_store(is_store),
+                              .is_branch(is_branch), .is_control_insn(is_control_insn));
+    
+    // Register File
+    wire [15:0] rs_data, rt_data;
+    lc4_regfile register(.clk(clk), .gwe(gwe), .rst(rst),
+                         .i_rs(r1sel), .i_rt(r2sel), .i_rd(test_regfile_wsel), .i_rd_we(test_regfile_we), .i_wdata(test_regfile_data),
+                         .o_rs_data(rs_data), .o_rt_data(rt_data));
+    
+    // ALU
+    wire [15:0] alu_output;
+    wire [15:0] pc_addone;
+    assign test_regfile_data = is_load ? i_cur_dmem_data : (select_pc_plus_one ? pc_addone : alu_output);
+    lc4_alu alu (.i_insn(i_cur_insn), .i_pc(pc), .i_r1data(rs_data), .i_r2data(rt_data), .o_result(alu_output));
 
-   wire [2:0] r1sel;
-   wire r1re;
-   wire [2:0] r2sel;
-   wire r2re;
-   wire [2:0] wsel;
-   wire regfile_we;
-   wire nzp_we;
-   wire select_pc_plus_one;
-   wire is_load;
-   wire is_store;
-   wire is_branch;
-   wire is_control_insn;
+    // NZP
+    wire [2:0] new_nzp;
+    assign test_nzp_new_bits = (test_regfile_data[15] == 1'b1) ? 3'b100 : (test_regfile_data == 16'h0) ? 3'b010 : (test_regfile_data > 16'h0) ? 3'b001 : 3'b000;
+    Nbit_reg #(3) nzp_reg(.in(test_nzp_new_bits), .out(new_nzp), .clk(clk), .we(test_nzp_we), .gwe(gwe), .rst(rst));
 
-   wire [15:0] rs_data, rt_data, rd_data;
-   wire rd_we;
+    // Find PC
+    assign next_pc = (i_cur_insn[15:9] == 7'b0000111 | i_cur_insn[15:11] == 5'b01001 | i_cur_insn[15:11] == 5'b11001 | i_cur_insn[15:12] == 4'b1111 | 
+                     (i_cur_insn[15:9] == 7'b0000001 & new_nzp == 3'b001) | (i_cur_insn[15:9] == 7'b0000010 & new_nzp == 3'b010) |
+                     (i_cur_insn[15:9] == 7'b0000100 & new_nzp == 3'b100) | (i_cur_insn[15:9] == 7'b0000011 & (new_nzp == 3'b001 | new_nzp == 3'b010)) |
+                     (i_cur_insn[15:9] == 7'b0000101 & (new_nzp == 3'b100 | new_nzp == 3'b001)) |
+                     (i_cur_insn[15:9] == 7'b0000110 & (new_nzp == 3'b100 | new_nzp == 3'b010)))
+                      ? alu_output : (((i_cur_insn[15:11] == 5'b01000) | (i_cur_insn[15:11] == 5'b11000) | (i_cur_insn[15:12] == 5'b1000)) ? rs_data : pc_addone);
 
-   lc4_decoder decoder (.insn(i_cur_insn), .r1sel(r1sel), .r1re(r1re), .r2sel(r2sel), .r2re(r2re), .wsel(wsel),
-                        .regfile_we(regfile_we), .nzp_we(nzp_we), .select_pc_plus_one(select_pc_plus_one), .is_load(is_load),
-                        .is_store(is_store), .is_branch(is_branch), .is_control_insn(is_control_insn));
+    // Increment PC
+    cla16 incrementor(.a(pc), .b(16'b0), .cin(1'b1), .sum(pc_addone));
 
-   lc4_regfile register (.clk(clk), .gwe(gwe), .rst(rst), .i_rs(r1sel), .o_rs_data(rs_data), .i_rt(r2sel), .o_rt_data(rt_data),
-                         .i_rd(wsel), .i_wdata(rd_data), .i_rd_we(regfile_we));
-
-   lc4_alu alu (.i_insn(i_cur_insn), .i_pc(pc), .i_r1data(rs_data), .i_r2data(rt_data), .o_result(rd_data));
-   assign nzp = (rd_data[15] == 1'b1) ? 3'b100 : (rd_data == 16'h0) ? 3'b010 : (rd_data > 16'h0) ? 3'b001 : 3'b000;
-
-
-   cla16 cla (.a(pc), .b(1'd0), .cin(1), .sum(next_pc));
-
-   // actual output wires
-   assign o_cur_pc = pc;
-   assign o_dmem_we = 1'd0; // change this for lab 3B
-   assign o_dmem_addr = 1'd0; // change this for lab 3B
-   assign o_dmem_towrite = 1'd0; // change this for lab 3B
-
-
-   // test cases
-   assign test_cur_pc = pc;
-   assign test_cur_insn = i_cur_insn;
-   assign test_regfile_we = regfile_we;
-   assign test_regfile_wsel = wsel;
-   assign test_regfile_data = rd_data;
-   assign test_nzp_we = nzp_we;
-   assign test_nzp_new_bits = nzp;
-   assign test_dmem_we = 1'd0; // change bottom 3 after 3A
-   assign test_dmem_addr = 1'd0;
-   assign test_dmem_data = 1'd0;
+    // Test wires
+    assign test_dmem_data = is_store ? rt_data : (is_load ? i_cur_dmem_data : 0);
+    assign test_dmem_we = is_store;
+    assign o_dmem_we = test_dmem_we;
+    assign test_dmem_addr = (is_load | is_store) ? alu_output : 0;
+    assign o_dmem_addr = test_dmem_addr;
+    assign o_dmem_towrite = is_store ? rt_data : 0;
+    assign o_cur_pc = pc;
+    assign test_cur_pc = pc;
+    assign test_cur_insn = i_cur_insn;
 
    /* Add $display(...) calls in the always block below to
     * print out debug information at the end of every cycle.
