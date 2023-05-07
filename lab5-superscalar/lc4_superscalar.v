@@ -81,7 +81,7 @@ module lc4_processor(input wire         clk,             // main clock
    wire [1:0] m_stall_A, m_stall_B;
    wire [2:0] m_regfile_wsel_A, m_r1sel_A, m_r2sel_A, m_regfile_wsel_B, m_r1sel_B, m_r2sel_B;
    wire [15:0] m_pc_A, m_o_rt_data_A, m_o_rs_data_A, m_i_cur_insn_A, m_alu_output_A, m_o_rt_data_final_A,
-               m_pc_B, m_o_rt_data_B, m_o_rs_data_B, m_i_cur_insn_B, m_alu_output_B, m_o_rt_data_final_B;
+               m_pc_B, m_o_rt_data_B, m_o_rs_data_B, m_i_cur_insn_B, m_alu_output_B, m_o_rs_data_final_B, m_o_rt_data_final_B;
    wire [148:0] w_reg_in_A, w_reg_in_B;
 
    wire [1:0] m_pc_addone;
@@ -124,7 +124,6 @@ module lc4_processor(input wire         clk,             // main clock
 
    // DECODE stage
    // Bypasses
-   // TO DO: add MM bypass between pipes A and B
    wire wm_bypass_A = ((m_r2sel_A == test_regfile_wsel_A) && m_is_store_A && test_regfile_we_A) ? 1 : 0;
    wire wm_bypass_B = ((m_r2sel_B == test_regfile_wsel_B) && m_is_store_B && test_regfile_we_B) ? 1 : 0;
    wire wx_bypass1_A = ((x_r1sel_A == test_regfile_wsel_A) && x_r1re_A && test_regfile_we_A) ? 1 : 0;
@@ -135,6 +134,8 @@ module lc4_processor(input wire         clk,             // main clock
    wire mx_bypass1_B = ((x_r1sel_B == m_regfile_wsel_B) && x_r1re_B && m_regfile_we_B) ? 1 : 0;
    wire mx_bypass2_A = ((x_r2sel_A == m_regfile_wsel_A) && x_r2re_A && m_regfile_we_A) ? 1 : 0;
    wire mx_bypass2_B = ((x_r2sel_B == m_regfile_wsel_B) && x_r2re_B && m_regfile_we_B) ? 1 : 0;
+   wire mm_bypass1 = ((m_r1sel_B == m_regfile_wsel_A) && m_r1re_B && m_regfile_we_B) ? 1 : 0; // new MM bypass
+   wire mm_bypass2 = ((m_r2sel_B == m_regfile_wsel_A) && m_r2re_B && m_regfile_we_B) ? 1 : 0;
 
    // Stall Logic
    wire [2:0] x_nzp_new_bits_A = (x_i_cur_insn_A[15:12] == 4'b0010) ? (($signed(alu_output_A) > 0) ? 3'b001 : ($signed(alu_output_A) == 0) ? 3'b010 : 3'b100)
@@ -191,7 +192,7 @@ module lc4_processor(input wire         clk,             // main clock
 
    Nbit_reg #(2, 2) f_stall_reg (.in(f_stall), .out(should_stall_middle), .clk(clk), .we(1'b1), .gwe(gwe), .rst(rst)); // Set = 2 by default. need for pipe B  
    
-   // TO DO: stop making stall register 2 by default and do it some other way
+
    assign should_stall_A = (should_flush) ? 2 : is_data_hazard_A ? 3 : should_stall_middle;
    assign should_stall_B = (should_flush) ? 2 : (is_data_hazard_A || superscalar_stall) ? 1 : is_data_hazard_B ? 3 : should_stall_middle;
 
@@ -345,11 +346,13 @@ module lc4_processor(input wire         clk,             // main clock
    assign m_pc_B = m_reg_out_B[31:16];
    assign m_alu_output_B = m_reg_out_B[15:0];
 
-   // TO DO: revisit this logic - is key for non-ALU operations. need to have logic for when both pipes loading/storing and LTU dependences
-   // all logic until writeback implementation
+   // make sure this logic is correct
+   // incorporate MM bypass
    assign o_dmem_addr = (m_is_load_A | m_is_store_A | m_is_load_B | m_is_store_B) ? m_alu_output_A : 0;
    assign o_dmem_we = m_is_store_A | m_is_store_B;
    assign o_dmem_towrite = m_is_store_A ? m_o_rt_data_final_A : m_is_store_B ? m_o_rt_data_final_B : 0;
+
+   // TO DO: uncomment following: assign m_o_rs_data_final_B = mm_bypass_1 ?  : m_o_rs_data_B;
    assign m_o_rt_data_final_A = wm_bypass_A ? test_regfile_data_A : m_o_rt_data_A;
    assign m_o_rt_data_final_B = wm_bypass_B ? test_regfile_data_B : m_o_rt_data_B;
 
@@ -421,10 +424,10 @@ module lc4_processor(input wire         clk,             // main clock
 
    // cla16 incrementor_A(.a(pc), .b(w_pc_addone), .cin(1'b0), .sum(pc_addone_A));
    cla16 incrementor2_A(.a(w_pc_A), .b(16'b0), .cin(1'b1), .sum(w_pc_addone_A));
-   assign test_regfile_data_A = test_regfile_we_A ? (w_is_load_A ? w_i_cur_dmem_data_A : (w_select_pc_plus_one_A ? w_pc_addone_A : w_alu_output_A)) : 0;
+   assign test_regfile_data_A = test_regfile_we_A ? (w_is_load_A ? w_i_cur_dmem_data_A : (w_select_pc_plus_one_A ? w_pc_addone : w_alu_output_A)) : 0;
 
    cla16 incrementor2_B(.a(w_pc_B), .b(16'b0), .cin(1'b1), .sum(w_pc_addone_B));
-   assign test_regfile_data_B = test_regfile_we_B ? (w_is_load_B ? w_i_cur_dmem_data_B : (w_select_pc_plus_one_B ? w_pc_addone_B : w_alu_output_B)) : 0;
+   assign test_regfile_data_B = test_regfile_we_B ? (w_is_load_B ? w_i_cur_dmem_data_B : (w_select_pc_plus_one_B ? w_pc_addone : w_alu_output_B)) : 0;
 
    assign test_nzp_new_bits_A = (w_i_cur_insn_A[15:12] == 4'b0010) ? (($signed(w_alu_output_A) > 0) ? 3'b001 : ($signed(w_alu_output_A) == 0) ? 3'b010 : 3'b100) : (($signed(test_regfile_data_A) > 0) ? 3'b001 : ($signed(test_regfile_data_A) == 0) ? 3'b010 : 3'b100);
    Nbit_reg #(3) nzp_reg_A(.in(test_nzp_new_bits_A), .out(new_nzp_A), .clk(clk), .we(test_nzp_we_A && test_stall_A != 2), .gwe(gwe), .rst(rst));
@@ -441,23 +444,25 @@ module lc4_processor(input wire         clk,             // main clock
     * to conditionally print out information.
     */
    always @(posedge gwe) begin
-     /*
+
      $display("Pipe A");
      $display("Time: %d start PC: %h | PC at F: %h | PC at D: %h | PC at X: %h | PC at M: %h | PC at W: %h | Stall: %h | D_PC_ADDONE: %d", $time, pc, f_pc_A, d_pc_A, x_pc_A, m_pc_A, w_pc_A, test_stall_A, d_pc_addone);
      $display("Instruction F: %h D: %h X: %h M: %h W: %h", f_insn_A, d_i_cur_insn_A, x_i_cur_insn_A, m_i_cur_insn_A, test_cur_insn_A);
      $display("Stall F: %d D: %d X: %d M: %d W: %d", should_stall_A, should_stall_A, x_stall_A, m_stall_A, test_stall_A);
-     $display("CURRENT STALL A: %d", current_stall_A);
-     $display("SUPERSCALAR STALL IN FETCH?: %d", status);
+     $display("Stall F: %d D: %d X: %d M: %d W: %d", should_stall_B, should_stall_B, x_stall_B, m_stall_B, test_stall_B);
+     // $display("CURRENT STALL A: %d", current_stall_A);
+     // $display("SUPERSCALAR STALL IN FETCH?: %d", status);
 
      $display("Pipe B");
      $display("Time: %d start PC: %h | PC at F: %h | PC at D: %h | PC at X: %h | PC at M: %h | PC at W: %h | Stall: %h | D_PC_ADDONE: %d", $time, pc, f_pc_B, d_pc_B, x_pc_B, m_pc_B, w_pc_B, test_stall_B, d_pc_addone);
      $display("Instruction F: %h D: %h X: %h M: %h W: %h", f_insn_B, d_i_cur_insn_B, x_i_cur_insn_B, m_i_cur_insn_B, test_cur_insn_B);
      $display("Stall F: %d D: %d X: %d M: %d W: %d", should_stall_B, should_stall_B, x_stall_B, m_stall_B, test_stall_B);
+     $display("Stall F: %d D: %d X: %d M: %d W: %d", should_stall_B, should_stall_B, x_stall_B, m_stall_B, test_stall_B);
 
-     $display("CURRENT STALL B: %d", current_stall_B);
-     $display("CURRENT D PC B: %h", current_d_pc_B);
-     $display("CURRENT F PC A: %h", current_f_pc_A);
-     */
+     // $display("CURRENT STALL B: %d", current_stall_B);
+     // $display("CURRENT D PC B: %h", current_d_pc_B);
+     // $display("CURRENT F PC A: %h", current_f_pc_A);
+     
 
      // $display("Instruction is store? %h", is_store_A);
      
@@ -503,6 +508,6 @@ module lc4_processor(input wire         clk,             // main clock
       // The Objects pane will update to display the wires
       // in that module.
 
-      // $display();
+      $display();
    end
 endmodule
